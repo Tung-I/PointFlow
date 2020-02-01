@@ -1,0 +1,22 @@
+main:
+    random_seed: 'nips2020'
+    saved_dir: '/home/tony/SceneFlow/models/flyingthings/flownet3d/test'
+    loaded_path: '/home/tony/SceneFlow/models/flyingthings/flownet3d/train/checkpoints/model_best.pth'
+
+net:
+    name: 'FlowNet3D'
+
+metrics:
+    - name: 'EndPointError'
+    - name: 'Accuracy'
+      kwargs:
+        threshold: 0.1
+
+predictor:
+    name: 'FlowNet3DPredictor'
+    kwargs:
+        data_dir: '/home/tony/datasets/flyingthings3D_35_20k_2k_8192'
+        data_split_csv: '/home/peter850706/kits19_preprocessed/dataset_split.csv'
+        device: 'cuda:0'
+        saved_dir: '/home/tony/SceneFlow/models/flyingthings/flownet3d/test'
+        exported: true

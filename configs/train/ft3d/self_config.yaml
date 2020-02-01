@@ -1,0 +1,77 @@
+main:
+    random_seed: 'nips2020'
+    saved_dir: '/home/tony/PointScene/models/ft3d/tmp/train'
+    # loaded_path: '/home/tony/PointScene/models/ft3d/flownet3d_new_matrics/train/checkpoints/180.pth'
+
+dataset:
+    name: 'FT3DSelfDataset'
+    kwargs:
+        data_dir: '/home/tony/datasets/ft3d_pc_data'
+        data_split_csv: '/home/tony/PointScene/ft3d_split_new.csv'
+        re_sample_size: 4096
+        train_preprocessings:
+        valid_preprocessings:
+        augments:
+        transforms:
+            - name: 'ToTensor'
+
+dataloader:
+    name: 'Dataloader'
+    kwargs:
+        train_batch_size: 32
+        valid_batch_size: 8
+        shuffle: true
+        num_workers: 4
+
+net:
+    name: 'FlowNet3DSelf'
+
+losses:
+    # - name: 'MyL2Loss'
+    #   weight: 1.0
+    - name: 'ChamferLoss'
+      weight: 0.0001
+    - name: 'SmoothnessLoss'
+      kwargs:
+        radius: 2.0
+        nsample: 4
+      weight: 0.01
+
+metrics:
+    - name: 'EPE'
+    - name: 'ACC_005'
+    - name: 'ACC_01'
+    - name : 'ADE'
+
+
+optimizer:
+    name: 'Adam'
+    kwargs:
+        lr: 0.0001
+        weight_decay: 0
+        amsgrad: false
+
+lr_scheduler:
+    name: 'StepLR'
+    kwargs:
+        step_size: 200
+        gamma: 0.1
+
+logger:
+    name: 'EmptyLogger'
+    kwargs:
+        dummy_input: [16, 1, 128, 128]
+
+monitor:
+    name: 'Monitor'
+    kwargs:
+        mode: 'min'
+        target: 'Loss'
+        saved_freq: 10
+        early_stop: 0
+
+trainer:
+    name: 'FT3DSelfTrainer'
+    kwargs:
+        device: 'cuda:0'
+        num_epochs: 600
