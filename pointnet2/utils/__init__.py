@@ -6,4 +6,4 @@ from __future__ import (
     unicode_literals,
 )
 from . import pointnet2_utils
-from . import pointnet2_modules
+# from . import pointnet2_modules

@@ -95,14 +95,14 @@ class KNN(Function):
         M = pos1.shape[1]
         pos2 = pos2.view(B, 1, N, -1).repeat(1, M, 1, 1)
         pos1 = pos1.view(B, M, 1, -1).repeat(1, 1, N, 1)
-        dist = torch.sum(-(pos1 - pos2)**2, -1)
-        val, idx = torch.topk(dist, k, dim=-1)
+        dist = torch.sum(-(pos1 - pos2)**2, -1) # [B, npoint, N]
+        val, idx = torch.topk(dist, k, dim=-1) # [B, npoint, K]
 
         return torch.sqrt(-val), idx.int()
 
     @staticmethod
     def backward(ctx, a=None, b=None):
-        return None, None
+        return None, None, None
 
 
 knn = KNN.apply
