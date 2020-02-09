@@ -3,6 +3,7 @@ import random
 import functools
 import numpy as np
 import SimpleITK as sitk
+import math
 from skimage.transform import resize
 from skimage.morphology import label
 
@@ -97,6 +98,31 @@ class ToTensor(BaseTransform):
         else:
             imgs = tuple(img.float() for img in map(torch.from_numpy, imgs))
         return imgs
+
+
+class PointCloudRotate(BaseTransform):
+    """
+    """
+    def __init__(self, degree):
+        self.degree = degree
+
+    def __call__(self, points):
+        """
+        Args:
+            points (numpy.ndarray): [N, 3]
+            degree
+
+        Returns:
+            rotated_points (numpy.ndarray): [N, 3]
+        """
+        pi = 3.1415926
+        rotate_ang = pi * self.degree / 180
+        T = [[math.cos(rotate_ang), -math.sin(rotate_ang), 0],
+             [math.sin(rotate_ang), math.cos(rotate_ang), 0],
+             [0, 0, 1]]
+        points_T = np.dot(points, T)
+
+        return points_T
 
 
 class Normalize(BaseTransform):

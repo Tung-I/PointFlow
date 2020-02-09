@@ -2,13 +2,12 @@ import csv
 import glob
 import torch
 import numpy as np
-import random
 
 from src.data.datasets.base_dataset import BaseDataset
 from src.data.transforms import compose
 
 
-class FT3DSelfDataset(BaseDataset):
+class FT3DRotateDataset(BaseDataset):
     """The Kidney Tumor Segmentation (KiTS) Challenge dataset (ref: https://kits19.grand-challenge.org/) for the 3D segmentation method.
 
     Args:
@@ -46,6 +45,8 @@ class FT3DSelfDataset(BaseDataset):
         file = np.load(data_path)
         point1 = file['points1'].astype('float32')
         point2 = file['points2'].astype('float32')
+        rgb1 = file['color1'].astype('float32')
+        rgb2 = file['color2'].astype('float32')
         flow = file['flow'].astype('float32')
         mask = file['mask']
 
@@ -57,6 +58,8 @@ class FT3DSelfDataset(BaseDataset):
 
             point1 = point1[sample_idx1, :]
             point2 = point2[sample_idx2, :]
+            rgb1 = rgb1[sample_idx1, :]
+            rgb2 = rgb2[sample_idx2, :]
             flow = flow[sample_idx1, :]
             mask = mask[sample_idx1]
         # else:
@@ -67,16 +70,23 @@ class FT3DSelfDataset(BaseDataset):
         #     flow = flow[:self.npoints, :]
         #     mask = mask[:self.npoints]
 
+        # rotate
+        point2 = self.augments(point2)
+
+
         point1_center = np.mean(point1, 0)
         point1 -= point1_center
         point2 -= point1_center
 
         point1, point2 = self.transforms(point1, point2, dtypes=[torch.float, torch.float])
+        rgb1, rgb2 = self.transforms(rgb1, rgb2, dtypes=[torch.float, torch.float])
         flow, mask = self.transforms(flow, mask, dtypes=[torch.float, torch.float])
 
         point1 = point1.transpose(1,0).contiguous()
         point2 = point2.transpose(1,0).contiguous()
+        rgb1 = rgb1.transpose(1,0).contiguous()
+        rgb2 = rgb2.transpose(1,0).contiguous()
         flow = flow.transpose(1,0).contiguous()
         mask = mask.float().contiguous()
 
-        return {"point1": point1, "point2": point2, "flow": flow, "mask": mask}
+        return {"point1": point1, "point2": point2, "rgb1": rgb1, "rgb2": rgb2, "flow": flow, "mask": mask}
