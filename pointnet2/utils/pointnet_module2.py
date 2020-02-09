@@ -2,88 +2,54 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
+import math
 
 from pointnet2.utils import pointnet2_utils as pointutils
 
 
-class CLModule(nn.Module): # center learning
-    def __init__(self, npoint, radius, nsample, in_channel, mlp1, mlp2):
-        super(CLModule, self).__init__()
+class RSSAModule(nn.Module): # set abstraction
+    def __init__(self, npoint, radius, nsample, c_in, c_out, first_layer):
+        super(RSSAModule, self).__init__()
         self.npoint = npoint
         self.radius = radius
         self.nsample = nsample
-        self.mlp1_convs = nn.ModuleList()
-        self.mlp1_bns = nn.ModuleList()
-        self.mlp2_convs = nn.ModuleList()
-        self.mlp2_bns = nn.ModuleList()
-
-        last_channel = in_channel+3
-        for out_channel in mlp1:
-            self.mlp1_convs.append(nn.Conv2d(last_channel, out_channel, 1, bias=False))
-            self.mlp1_bns.append(nn.BatchNorm2d(out_channel))
-            last_channel = out_channel
-
-        last_channel = last_channel + 3
-        # self.maxpool = nn.MaxPool2d(factor)
-        self.conv1 = nn.Conv1d(last_channel, mlp2[0], kernel_size=1, bias=False)
-        self.bn1 = nn.BatchNorm1d(mlp2[0])
-        self.conv2 = nn.Conv1d(mlp2[0], 3, kernel_size=1, bias=True)
+        # self.group_all = group_all
+        # self.mlp_convs = nn.ModuleList()
+        # self.mlp_bns = nn.ModuleList()
+        # last_channel = in_channel+3   # TODO：
+        # for out_channel in mlp:
+        #     self.mlp_convs.append(nn.Conv2d(last_channel, out_channel, 1, bias = False))
+        #     self.mlp_bns.append(nn.BatchNorm2d(out_channel))
+        #     last_channel = out_channel
+        
 
         self.queryandgroup = pointutils.QueryAndGroup(radius, nsample)
+        self.first_layer = first_layer
+
+        # RS
+        c_in = c_in + 3
+        if first_layer:
+            self.mapping_func1 = nn.Conv2d(in_channels=10, out_channels=math.floor(c_out / 2), kernel_size=(1, 1), stride=(1, 1), bias=True)
+            self.bn_mapping = nn.BatchNorm2d(math.floor(c_out / 2))
+            self.mapping_func2 = nn.Conv2d(in_channels=math.floor(c_out / 2), out_channels=16, kernel_size=(1, 1), stride=(1, 1), bias=True)
+            self.xyz_raising = nn.Conv2d(in_channels=c_in, out_channels=16, kernel_size=(1, 1), stride=(1, 1), bias=True)
+            self.bn_xyz_raising = nn.BatchNorm2d(16)
+            self.bn_rsconv = nn.BatchNorm2d(16)
+            self.cr_mapping = nn.Conv1d(in_channels=16, out_channels=c_out, kernel_size=1, stride=1, bias=True)
+            self.bn_channel_raising = nn.BatchNorm1d(c_out)
+        else:
+            self.mapping_func1 = nn.Conv2d(in_channels=10, out_channels=math.floor(c_out / 4), kernel_size=(1, 1), stride=(1, 1), bias=True)
+            self.bn_mapping = nn.BatchNorm2d(math.floor(c_out / 4))
+            self.mapping_func2 = nn.Conv2d(in_channels=math.floor(c_out / 4), out_channels=c_in, kernel_size=(1, 1), stride=(1, 1), bias=True)
+            self.bn_rsconv = nn.BatchNorm2d(c_in)
+            self.cr_mapping = nn.Conv1d(in_channels=c_in, out_channels=c_out, kernel_size=1, stride=1, bias=True)
+            self.bn_channel_raising = nn.BatchNorm1d(c_out)
+
 
     def forward(self, xyz, points):
         """
         Input:
             xyz: input points position data, [B, C, N]
-            points: input points data, [B, D, N]
-        Return:
-            new_xyz: sampled points position data, [B, C, npoint]
-        """
-        xyz_t = xyz.permute(0, 2, 1).contiguous()   # [B, N, C]
-        # aggr_feat = self.queryandgroup(xyz_t, xyz_t, points) # [B, D+C, N, nsample]
-
-        fps_idx = pointutils.furthest_point_sample(xyz_t, self.npoint)  # [B, npoint]
-        new_xyz = pointutils.gather_operation(xyz, fps_idx)  # [B, C, npoint]
-        aggr_feat = self.queryandgroup(xyz_t, new_xyz.permute(0, 2, 1).contiguous(), points) # [B, D+C, npoints, nsample]
-
-        for i , conv in enumerate(self.mlp1_convs):
-            bn = self.mlp1_bns[i]
-            aggr_feat = F.relu(bn(conv(aggr_feat))) # [B, mlp1[-1], npoints, nsample]
-
-        # aggr_feat = self.maxpool(aggr_feat) # [B, mlp1[-1], npoints, nsample]
-        xyz_feat = torch.max(aggr_feat, -1)[0] # [B, mlp1[-1], npoints]
-
-        xyz_feat = torch.cat([xyz_feat, new_xyz], 1)
-        xyz_feat = F.relu(self.bn1(self.conv1(xyz_feat)))
-        xyz_change = self.conv2(xyz_feat) # [B, 3, npoint]
-
-        xyz_shifted = new_xyz + xyz_change
-
-        return xyz_change, xyz_shifted
-
-
-
-class SAModule(nn.Module): # set abstraction
-    def __init__(self, npoint, radius, nsample, in_channel, mlp):
-        super(SAModule, self).__init__()
-        self.npoint = npoint
-        self.radius = radius
-        self.nsample = nsample
-        self.mlp_convs = nn.ModuleList()
-        self.mlp_bns = nn.ModuleList()
-        last_channel = in_channel+3
-        for out_channel in mlp:
-            self.mlp_convs.append(nn.Conv2d(last_channel, out_channel, 1, bias = False))
-            self.mlp_bns.append(nn.BatchNorm2d(out_channel))
-            last_channel = out_channel
-        
-        self.queryandgroup = pointutils.QueryAndGroup(radius, nsample)
-
-    def forward(self, xyz, points, new_xyz=None):
-        """
-        Input:
-            xyz: input points position data, [B, C, N]
-            new_xyz_idx: centroid points, [B, C, npoint]
             points: input points data, [B, D, N]
         Return:
             new_xyz: sampled points position data, [B, C, S]
@@ -93,10 +59,69 @@ class SAModule(nn.Module): # set abstraction
         B, C, N = xyz.shape
         xyz_t = xyz.permute(0, 2, 1).contiguous()   # [B, N, C]
 
-        if new_xyz is None:
+        fps_idx = pointutils.furthest_point_sample(xyz_t, self.npoint)  # [B, npoint]
+        new_xyz = pointutils.gather_operation(xyz, fps_idx)  # [B, 3, npoint]
+        new_xyz_t = new_xyz.permute(0, 2, 1).contiguous()
+
+        _, idx = pointutils.knn(self.nsample, new_xyz_t, xyz_t)   # [B, npoint, nsample]
+        neighbors = pointutils.grouping_operation(xyz, idx)   # [B, 3, npoint, nsample]
+        centers = new_xyz.view(B, -1, self.npoint, 1).repeat(1, 1, 1, self.nsample)   # [B, 3, npoint, nsample]
+        pos_diff = centers - neighbors  # [B, 3, npoint, nsample]
+        distances = torch.norm(pos_diff, p=2, dim=1, keepdim=True)   # [B, 1, npoint, nsample]
+        h_xi_xj = torch.cat([distances, pos_diff, centers, neighbors], dim=1)   # [B, 1+3+3+3, npoint, nsample]
+
+        x = pointutils.grouping_operation(points, idx)   # [B, D, npoint, nsample]
+        x = torch.cat([neighbors, x], dim=1)   # [B, D+3, npoint, nsample]
+
+        h_xi_xj = self.mapping_func2(F.relu(self.bn_mapping(self.mapping_func1(h_xi_xj))))   # [B, c_in, npoint, nsample]
+        if self.first_layer:
+            x = F.relu(self.bn_xyz_raising(self.xyz_raising(x)))   # [B, c_in, npoint, nsample]
+        x = F.relu(self.bn_rsconv(torch.mul(h_xi_xj, x)))   # (B, c_in, npoint, nsample)
+        x = torch.max(x, -1)[0]   # [B, c_in, npoint]
+        x = F.relu(self.bn_channel_raising(self.cr_mapping(x)))   # [B, c_out, npoint]
+
+
+        return new_xyz, x
+
+
+class SAModule(nn.Module): # set abstraction
+    def __init__(self, npoint, radius, nsample, in_channel, mlp, group_all):
+        super(SAModule, self).__init__()
+        self.npoint = npoint
+        self.radius = radius
+        self.nsample = nsample
+        self.group_all = group_all
+        self.mlp_convs = nn.ModuleList()
+        self.mlp_bns = nn.ModuleList()
+        last_channel = in_channel+3   # TODO：
+        for out_channel in mlp:
+            self.mlp_convs.append(nn.Conv2d(last_channel, out_channel, 1, bias = False))
+            self.mlp_bns.append(nn.BatchNorm2d(out_channel))
+            last_channel = out_channel
+        
+        if group_all:
+            self.queryandgroup = pointutils.GroupAll()
+        else:
+            self.queryandgroup = pointutils.QueryAndGroup(radius, nsample)
+
+    def forward(self, xyz, points):
+        """
+        Input:
+            xyz: input points position data, [B, C, N]
+            points: input points data, [B, D, N]
+        Return:
+            new_xyz: sampled points position data, [B, C, S]
+            new_points_concat: sample points feature data, [B, D', S]
+        """
+        device = xyz.device
+        B, C, N = xyz.shape
+        xyz_t = xyz.permute(0, 2, 1).contiguous()   # [B, N, C]
+
+        if self.group_all == False:
             fps_idx = pointutils.furthest_point_sample(xyz_t, self.npoint)  # [B, npoint]
             new_xyz = pointutils.gather_operation(xyz, fps_idx)  # [B, C, npoint]
-
+        else:
+            new_xyz = xyz
         new_points = self.queryandgroup(xyz_t, new_xyz.transpose(2, 1).contiguous(), points) # [B, D+C, npoint, nsample]
         
         for i, conv in enumerate(self.mlp_convs):
@@ -106,8 +131,6 @@ class SAModule(nn.Module): # set abstraction
         new_points = torch.max(new_points, -1)[0]   # [B, channel, nsample]
 
         return new_xyz, new_points
-
-
 
 
 class FEModule(nn.Module): # flow embedding
@@ -153,18 +176,18 @@ class FEModule(nn.Module): # flow embedding
         if self.corr_func=='concat':
             feat_diff = torch.cat([feat2_grouped, feature1.view(B, -1, N, 1).repeat(1, 1, 1, self.nsample)], dim = 1)  # [B, 2*C, N, S]
         
-        feat1_new = torch.cat([pos_diff, feat_diff], dim = 1)  # [B, 2*C+3, N, S]
+        feat1_new = torch.cat([pos_diff, feat_diff], dim=1)  # [B, 2*C+3, N, S]
         for i, conv in enumerate(self.mlp_convs):
             bn = self.mlp_bns[i]
             feat1_new = F.relu(bn(conv(feat1_new)))
 
-        feat1_new = torch.max(feat1_new, -1)[0]  # [B, mlp[-1], N]
+        feat1_new = torch.max(feat1_new, -1)[0]  # [B, mlp[-1], npoint]
         return pos1, feat1_new
 
 
-class SUCModule(nn.Module): # set up conv
+class SUModule(nn.Module): # set upconv
     def __init__(self, nsample, radius, f1_channel, f2_channel, mlp, mlp2, knn=True):
-        super(SUCModule, self).__init__()
+        super(SUModule, self).__init__()
         self.nsample = nsample
         self.radius = radius
         self.knn = knn
@@ -196,7 +219,7 @@ class SUCModule(nn.Module): # set up conv
             xyz1: (batch_size, 3, npoint1)
             xyz2: (batch_size, 3, npoint2)
             feat1: (batch_size, channel1, npoint1) features for xyz1 points (earlier layers, more points)
-            feat2: (batch_size, channel2, npoint2) features for xyz2 points
+            feat2: (batch_size, channel1, npoint2) features for xyz2 points
         Output:
             feat1_new: (batch_size, npoint2, mlp[-1] or mlp2[-1] or channel1+3)
             TODO: Add support for skip links. Study how delta(XYZ) plays a role in feature updating.
@@ -213,7 +236,7 @@ class SUCModule(nn.Module): # set up conv
         pos_diff = pos2_grouped - pos1.view(B, -1, N, 1)    # [B, 3, N1, S]
 
         feat2_grouped = pointutils.grouping_operation(feature2, idx)
-        feat_new = torch.cat([feat2_grouped, pos_diff], dim=1)   # [B, C1+3, N1, S]
+        feat_new = torch.cat([feat2_grouped, pos_diff], dim = 1)   # [B, C1+3, N1, S]
         
         for conv in self.mlp1_convs:
             feat_new = conv(feat_new)
@@ -231,7 +254,7 @@ class SUCModule(nn.Module): # set up conv
         return feat_new
 
 
-class FPModule(nn.Module): # feature propogation
+class FPModule(nn.Module): # feature propagation
     def __init__(self, in_channel, mlp):
         super(FPModule, self).__init__()
         self.mlp_convs = nn.ModuleList()
@@ -274,69 +297,3 @@ class FPModule(nn.Module): # feature propogation
             bn = self.mlp_bns[i]
             feat_new = F.relu(bn(conv(feat_new)))
         return feat_new
-
-
-# class SAModule(nn.Module): # set abstraction
-#     def __init__(self, npoint, radius, nsample_1, nsample_2, in_channel, mlp_1, mlp_2):
-#         super(SAModule, self).__init__()
-#         self.npoint = npoint
-#         self.radius = radius
-
-#         self.nsample_1 = nsample_1
-#         self.nsample_2 = nsample_2
-
-#         self.mlp_convs_1 = nn.ModuleList()
-#         self.mlp_bns_1 = nn.ModuleList()
-#         self.mlp_convs_2 = nn.ModuleList()
-#         self.mlp_bns_2 = nn.ModuleList()
-
-#         last_channel = in_channel + 3  
-#         for out_channel in mlp_1:
-#             self.mlp_convs_1.append(nn.Conv2d(last_channel, out_channel, 1, bias = False))
-#             self.mlp_bns_1.append(nn.BatchNorm2d(out_channel))
-#             last_channel = out_channel
-
-#         last_channel = in_channel + 3  
-#         for out_channel in mlp_2:
-#             self.mlp_convs_2.append(nn.Conv2d(last_channel, out_channel, 1, bias = False))
-#             self.mlp_bns_2.append(nn.BatchNorm2d(out_channel))
-#             last_channel = out_channel
-        
-#         self.queryandgroup_1 = pointutils.QueryAndGroup(radius, nsample_1)
-#         self.queryandgroup_2 = pointutils.QueryAndGroup(radius, nsample_2)
-
-#     def forward(self, xyz, points):
-#         """
-#         Input:
-#             xyz: input points position data, [B, C, N]
-#             points: input points data, [B, D, N]
-#         Return:
-#             new_xyz: sampled points position data, [B, C, S]
-#             new_points_concat: sample points feature data, [B, D', S]
-#         """
-#         device = xyz.device
-#         B, C, N = xyz.shape
-#         xyz_t = xyz.permute(0, 2, 1).contiguous()   # [B, N, C]
-
-#         aggregate_1 = self.queryandgroup_1(xyz_t, xyz_t, points) # [B, D+C, N, nsample1]
-
-#         for i , conv in enumerate(self.mlp_convs_1):
-#             bn = self.mlp_bns_1[i]
-#             aggregate_1 = F.relu(bn(conv(aggregate_1))) # [B, channel1, N, nsample1]
-
-#         aggregate_1 = torch.norm(aggregate_1, p=2, dim=1) # [B, N, nsample1]
-#         aggregate_1 = torch.max(aggregate_1, -1)[0] # [B, N]
-
-#         val, idx = torch.topk(aggregate_1, self.npoint, dim=-1) # [B, npoint]
-
-#         new_xyz = pointutils.gather_operation(xyz, idx.int())  # [B, C, npoint]
-
-#         new_points = self.queryandgroup_2(xyz_t, new_xyz.transpose(2, 1).contiguous(), points) # [B, D+C, npoint, nsample2]
-        
-#         for i, conv in enumerate(self.mlp_convs_2):
-#             bn = self.mlp_bns_2[i]
-#             new_points =  F.relu(bn(conv(new_points)))   # [B, channel2, npoint, nsample2]
-        
-#         new_points = torch.max(new_points, -1)[0]   # [B, channel2, npoint]
-
-#         return new_xyz, new_points

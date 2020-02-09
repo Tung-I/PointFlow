@@ -102,7 +102,7 @@ class KNN(Function):
 
     @staticmethod
     def backward(ctx, a=None, b=None):
-        return None, None, None
+        return None, None
 
 
 knn = KNN.apply
