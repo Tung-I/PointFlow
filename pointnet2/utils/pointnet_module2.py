@@ -7,6 +7,87 @@ import math
 from pointnet2.utils import pointnet2_utils as pointutils
 
 
+class RSSAModule2(nn.Module): # set abstraction
+    def __init__(self, npoint, radius, nsample, c_in, c_out, first_layer, mlp):
+        super(RSSAModule2, self).__init__()
+        self.npoint = npoint
+        self.radius = radius
+        self.nsample = nsample
+        # self.group_all = group_all
+        self.mlp_convs = nn.ModuleList()
+        self.mlp_bns = nn.ModuleList()
+
+        self.queryandgroup = pointutils.QueryAndGroup(radius, nsample)
+        self.first_layer = first_layer
+
+        # RS
+        c_in = c_in + 3
+        if first_layer:
+            self.mapping_func1 = nn.Conv2d(in_channels=10, out_channels=math.floor(c_out / 2), kernel_size=(1, 1), stride=(1, 1), bias=True)
+            self.bn_mapping = nn.BatchNorm2d(math.floor(c_out / 2))
+            self.mapping_func2 = nn.Conv2d(in_channels=math.floor(c_out / 2), out_channels=16, kernel_size=(1, 1), stride=(1, 1), bias=True)
+            self.xyz_raising = nn.Conv2d(in_channels=c_in, out_channels=16, kernel_size=(1, 1), stride=(1, 1), bias=True)
+            self.bn_xyz_raising = nn.BatchNorm2d(16)
+            self.bn_rsconv = nn.BatchNorm2d(16)
+            # self.cr_mapping = nn.Conv1d(in_channels=16, out_channels=c_out, kernel_size=1, stride=1, bias=True)
+            # self.bn_channel_raising = nn.BatchNorm1d(c_out)
+        else:
+            self.mapping_func1 = nn.Conv2d(in_channels=10, out_channels=math.floor(c_out / 4), kernel_size=(1, 1), stride=(1, 1), bias=True)
+            self.bn_mapping = nn.BatchNorm2d(math.floor(c_out / 4))
+            self.mapping_func2 = nn.Conv2d(in_channels=math.floor(c_out / 4), out_channels=c_in, kernel_size=(1, 1), stride=(1, 1), bias=True)
+            self.bn_rsconv = nn.BatchNorm2d(c_in)
+            # self.cr_mapping = nn.Conv1d(in_channels=c_in, out_channels=c_out, kernel_size=1, stride=1, bias=True)
+            # self.bn_channel_raising = nn.BatchNorm1d(c_out)
+
+        last_channel = c_in if not first_layer else 16
+        for out_channel in mlp:
+            self.mlp_convs.append(nn.Conv2d(last_channel, out_channel, 1, bias = False))
+            self.mlp_bns.append(nn.BatchNorm2d(out_channel))
+            last_channel = out_channel
+
+    def forward(self, xyz, points):
+        """
+        Input:
+            xyz: input points position data, [B, C, N]
+            points: input points data, [B, D, N]
+        Return:
+            new_xyz: sampled points position data, [B, C, S]
+            new_points_concat: sample points feature data, [B, D', S]
+        """
+        device = xyz.device
+        B, C, N = xyz.shape
+        xyz_t = xyz.permute(0, 2, 1).contiguous()   # [B, N, C]
+
+        fps_idx = pointutils.furthest_point_sample(xyz_t, self.npoint)  # [B, npoint]
+        new_xyz = pointutils.gather_operation(xyz, fps_idx)  # [B, 3, npoint]
+        new_xyz_t = new_xyz.permute(0, 2, 1).contiguous()
+
+        _, idx = pointutils.knn(self.nsample, new_xyz_t, xyz_t)   # [B, npoint, nsample]
+        neighbors = pointutils.grouping_operation(xyz, idx)   # [B, 3, npoint, nsample]
+        centers = new_xyz.view(B, -1, self.npoint, 1).repeat(1, 1, 1, self.nsample)   # [B, 3, npoint, nsample]
+        pos_diff = centers - neighbors  # [B, 3, npoint, nsample]
+        distances = torch.norm(pos_diff, p=2, dim=1, keepdim=True)   # [B, 1, npoint, nsample]
+        h_xi_xj = torch.cat([distances, pos_diff, centers, neighbors], dim=1)   # [B, 1+3+3+3, npoint, nsample]
+
+        x = pointutils.grouping_operation(points, idx)   # [B, D, npoint, nsample]
+        x = torch.cat([neighbors, x], dim=1)   # [B, D+3, npoint, nsample]
+
+        h_xi_xj = self.mapping_func2(F.relu(self.bn_mapping(self.mapping_func1(h_xi_xj))))   # [B, c_in, npoint, nsample]
+        if self.first_layer:
+            x = F.relu(self.bn_xyz_raising(self.xyz_raising(x)))   # [B, c_in, npoint, nsample]
+        x = F.relu(self.bn_rsconv(torch.mul(h_xi_xj, x)))   # (B, c_in, npoint, nsample)
+
+        for i, conv in enumerate(self.mlp_convs):
+            bn = self.mlp_bns[i]
+            x =  F.relu(bn(conv(x)))   # [B, c_out, npoint, nsample]
+
+        x = torch.max(x, -1)[0]   # [B, c_out, npoint]
+        # x = F.relu(self.bn_channel_raising(self.cr_mapping(x)))   # [B, c_out, npoint]
+
+
+        return new_xyz, x
+
+
 class RSSAModule(nn.Module): # set abstraction
     def __init__(self, npoint, radius, nsample, c_in, c_out, first_layer):
         super(RSSAModule, self).__init__()

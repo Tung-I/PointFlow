@@ -3,7 +3,7 @@ import torch
 import numpy as np
 import torch.nn.functional as F
 from src.model.nets.base_net import BaseNet
-from pointnet2.utils.pointnet_module2 import RSSAModule, FEModule, SUModule, FPModule
+from pointnet2.utils.pointnet_module2 import RSSAModule, FEModule, SUModule, FPModule, RSSAModule2
 
 
 
@@ -11,10 +11,15 @@ class RSFlowNet3D(BaseNet):
     def __init__(self):
         super(RSFlowNet3D,self).__init__()
 
-        self.sa1 = RSSAModule(npoint=1024, radius=0.5, nsample=16, c_in=3, c_out=64, first_layer=True)
-        self.sa2 = RSSAModule(npoint=256, radius=1.0, nsample=16, c_in=64, c_out=128, first_layer=False)
-        self.sa3 = RSSAModule(npoint=64, radius=2.0, nsample=8, c_in=128, c_out=256, first_layer=False)
-        self.sa4 = RSSAModule(npoint=16, radius=4.0, nsample=8, c_in=256, c_out=512, first_layer=False)
+        self.sa1 = RSSAModule2(npoint=1024, radius=0.5, nsample=16, c_in=3, c_out=64, first_layer=True, mlp=[32, 32, 64])
+        self.sa2 = RSSAModule2(npoint=256, radius=1.0, nsample=16, c_in=64, c_out=128, first_layer=False, mlp=[64, 64, 128])
+        self.sa3 = RSSAModule2(npoint=64, radius=2.0, nsample=8, c_in=128, c_out=256, first_layer=False, mlp=[128, 128, 256])
+        self.sa4 = RSSAModule2(npoint=16, radius=4.0, nsample=8, c_in=256, c_out=512, first_layer=False, mlp=[256, 256, 512])
+
+        # self.sa1 = RSSAModule(npoint=1024, radius=0.5, nsample=16, c_in=3, c_out=64, first_layer=True)
+        # self.sa2 = RSSAModule(npoint=256, radius=1.0, nsample=16, c_in=64, c_out=128, first_layer=False)
+        # self.sa3 = RSSAModule(npoint=64, radius=2.0, nsample=8, c_in=128, c_out=256, first_layer=False)
+        # self.sa4 = RSSAModule(npoint=16, radius=4.0, nsample=8, c_in=256, c_out=512, first_layer=False)
 
         # self.sa1 = PointNetSetAbstraction(npoint=1024, radius=0.5, nsample=16, in_channel=3, mlp=[32,32,64], group_all=False)
         # self.sa2 = PointNetSetAbstraction(npoint=256, radius=1.0, nsample=16, in_channel=64, mlp=[64, 64, 128], group_all=False)
